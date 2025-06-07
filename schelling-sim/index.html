@@ -38,10 +38,14 @@ const thresholdInput = document.getElementById('threshold');
 const thresholdVal = document.getElementById('thresholdVal');
 thresholdInput.addEventListener('input', () => thresholdVal.textContent = thresholdInput.value);
 
-function initGrid() {
+
+function initGrid(preserveSymbols=false) {
   grid = [];
-  symbolsA = [];
-  symbolsB = [];
+  if (!preserveSymbols) {
+    symbolsA = [];
+    symbolsB = [];
+  }
+
   for (let y=0; y<gridSize; y++) {
     let row = [];
     for (let x=0; x<gridSize; x++) row.push(null);
@@ -136,9 +140,18 @@ function nearSymbol(x,y, group) {
 }
 
 function step() {
+
+  const empties = [];
+  for (let y=0; y<gridSize; y++) {
+    for (let x=0; x<gridSize; x++) {
+      if (grid[y][x] === null && !symbolAt(x,y)) empties.push({x,y});
+    }
+  }
+
   const moves = [];
-  for (let y=0;y<gridSize;y++) {
-    for (let x=0;x<gridSize;x++) {
+  for (let y=0; y<gridSize; y++) {
+    for (let x=0; x<gridSize; x++) {
+
       const cell = grid[y][x];
       if (cell!=='A' && cell!=='B') continue;
       const n = neighbors(x,y);
@@ -146,12 +159,16 @@ function step() {
       let ratio = n.same / n.total;
       ratio += nearSymbol(x,y,cell);
       ratio = Math.max(0, Math.min(1, ratio));
-      if (ratio < parseFloat(thresholdInput.value)) {
-        const empty = randomEmptyCell();
-        if (empty) moves.push({from:{x,y}, to:empty});
+
+      if (ratio < parseFloat(thresholdInput.value) && empties.length>0) {
+        const idx = Math.floor(Math.random()*empties.length);
+        const empty = empties.splice(idx,1)[0];
+        moves.push({from:{x,y}, to:empty});
       }
     }
   }
+
+
   moves.forEach(m => {
     grid[m.to.y][m.to.x] = grid[m.from.y][m.from.x];
     grid[m.from.y][m.from.x] = null;
@@ -170,15 +187,24 @@ canvas.addEventListener('click', e => {
 document.getElementById('placeA').onclick=()=>{placing='A';};
 document.getElementById('placeB').onclick=()=>{placing='B';};
 document.getElementById('start').onclick=()=>{
-  initGrid();
+
+  initGrid(true);
   placeAgents(parseInt(document.getElementById('countA').value),
               parseInt(document.getElementById('countB').value));
   drawGrid();
+  placing = null;
+
   if (timer) clearInterval(timer);
   timer = setInterval(step, parseInt(document.getElementById('speed').value));
 };
 
-document.getElementById('stop').onclick=()=>{ if (timer) clearInterval(timer); };
+document.getElementById('stop').onclick=()=>{
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+};
+
 </script>
 </body>
 </html>
