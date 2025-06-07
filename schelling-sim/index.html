@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>シェリングの分離モデル シミュレーター</title>
+  <style>
+    body { font-family: sans-serif; }
+    #controls { margin-bottom: 1em; }
+    #grid { border: 1px solid #000; }
+  </style>
+</head>
+<body>
+  <h1>シェリングの分離モデル シミュレーター</h1>
+  <div id="controls">
+    A群: <input type="number" id="countA" value="150" min="0" max="400">
+    B群: <input type="number" id="countB" value="150" min="0" max="400"><br>
+    満足度閾値: <input type="range" id="threshold" min="0" max="1" step="0.05" value="0.3"><span id="thresholdVal">0.3</span><br>
+    スピード(ms): <input type="number" id="speed" value="500" min="50" step="50"><br>
+    <button id="placeA">A象徴配置</button>
+    <button id="placeB">B象徴配置</button>
+    <button id="start">開始</button>
+    <button id="stop">停止</button>
+  </div>
+  <canvas id="grid" width="600" height="600"></canvas>
+
+<script>
+const gridSize = 30;
+const cellSize = 20;
+const canvas = document.getElementById('grid');
+const ctx = canvas.getContext('2d');
+let grid = [];
+let symbolsA = [];
+let symbolsB = [];
+let timer = null;
+let placing = null;
+
+const thresholdInput = document.getElementById('threshold');
+const thresholdVal = document.getElementById('thresholdVal');
+thresholdInput.addEventListener('input', () => thresholdVal.textContent = thresholdInput.value);
+
+function initGrid(preserveSymbols=false) {
+  grid = [];
+  if (!preserveSymbols) {
+    symbolsA = [];
+    symbolsB = [];
+  }
+  for (let y=0; y<gridSize; y++) {
+    let row = [];
+    for (let x=0; x<gridSize; x++) row.push(null);
+    grid.push(row);
+  }
+}
+
+function drawGrid() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for (let y=0; y<gridSize; y++) {
+    for (let x=0; x<gridSize; x++) {
+      const cell = grid[y][x];
+      ctx.strokeStyle = '#ccc';
+      ctx.strokeRect(x*cellSize, y*cellSize, cellSize, cellSize);
+      if (cell === 'A') {
+        ctx.fillStyle = '#1f77b4';
+        ctx.fillRect(x*cellSize, y*cellSize, cellSize, cellSize);
+      } else if (cell === 'B') {
+        ctx.fillStyle = '#ff7f0e';
+        ctx.fillRect(x*cellSize, y*cellSize, cellSize, cellSize);
+      }
+    }
+  }
+  // draw symbols
+  ctx.fillStyle = 'blue';
+  symbolsA.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x*cellSize + cellSize/2, p.y*cellSize + cellSize/2, cellSize/4, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.fillStyle = 'red';
+  symbolsB.forEach(p => {
+    ctx.beginPath();
+    ctx.rect(p.x*cellSize + cellSize/4, p.y*cellSize + cellSize/4, cellSize/2, cellSize/2);
+    ctx.fill();
+  });
+}
+
+function randomEmptyCell() {
+  const empties = [];
+  for (let y=0; y<gridSize; y++) {
+    for (let x=0; x<gridSize; x++) {
+      if (grid[y][x] === null && !symbolAt(x,y)) empties.push({x,y});
+    }
+  }
+  if (empties.length === 0) return null;
+  return empties[Math.floor(Math.random()*empties.length)];
+}
+
+function symbolAt(x,y) {
+  return symbolsA.some(p=>p.x===x&&p.y===y) || symbolsB.some(p=>p.x===x&&p.y===y);
+}
+
+function placeAgents(countA, countB) {
+  let cA = 0, cB = 0;
+  while (cA < countA || cB < countB) {
+    const cell = randomEmptyCell();
+    if (!cell) break;
+    if (cA < countA) {
+      grid[cell.y][cell.x] = 'A';
+      cA++; continue;
+    }
+    if (cB < countB) {
+      grid[cell.y][cell.x] = 'B';
+      cB++; continue;
+    }
+  }
+}
+
+function neighbors(x,y) {
+  const dirs = [-1,0,1];
+  let same=0, total=0;
+  for (let dy of dirs) for (let dx of dirs) {
+    if (dx===0 && dy===0) continue;
+    const nx=x+dx, ny=y+dy;
+    if (nx<0||ny<0||nx>=gridSize||ny>=gridSize) continue;
+    const v=grid[ny][nx];
+    if (v==='A' || v==='B') {
+      total++;
+      if (v===grid[y][x]) same++;
+    }
+  }
+  return {same,total};
+}
+
+function nearSymbol(x,y, group) {
+  const set = group==='A'?symbolsA:symbolsB;
+  const other = group==='A'?symbolsB:symbolsA;
+  for (let p of set) if (Math.abs(p.x-x)<=1 && Math.abs(p.y-y)<=1) return 0.2;
+  for (let p of other) if (Math.abs(p.x-x)<=1 && Math.abs(p.y-y)<=1) return -0.2;
+  return 0;
+}
+
+function step() {
+  const empties = [];
+  for (let y=0; y<gridSize; y++) {
+    for (let x=0; x<gridSize; x++) {
+      if (grid[y][x] === null && !symbolAt(x,y)) empties.push({x,y});
+    }
+  }
+
+  const moves = [];
+  for (let y=0; y<gridSize; y++) {
+    for (let x=0; x<gridSize; x++) {
+      const cell = grid[y][x];
+      if (cell!=='A' && cell!=='B') continue;
+      const n = neighbors(x,y);
+      if (n.total===0) continue;
+      let ratio = n.same / n.total;
+      ratio += nearSymbol(x,y,cell);
+      ratio = Math.max(0, Math.min(1, ratio));
+      if (ratio < parseFloat(thresholdInput.value) && empties.length>0) {
+        const idx = Math.floor(Math.random()*empties.length);
+        const empty = empties.splice(idx,1)[0];
+        moves.push({from:{x,y}, to:empty});
+      }
+    }
+  }
+
+  moves.forEach(m => {
+    grid[m.to.y][m.to.x] = grid[m.from.y][m.from.x];
+    grid[m.from.y][m.from.x] = null;
+  });
+  drawGrid();
+}
+
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left)/cellSize);
+  const y = Math.floor((e.clientY - rect.top)/cellSize);
+  if (placing==='A') { symbolsA.push({x,y}); drawGrid(); }
+  else if (placing==='B') { symbolsB.push({x,y}); drawGrid(); }
+});
+
+document.getElementById('placeA').onclick=()=>{placing='A';};
+document.getElementById('placeB').onclick=()=>{placing='B';};
+document.getElementById('start').onclick=()=>{
+  initGrid(true);
+  placeAgents(parseInt(document.getElementById('countA').value),
+              parseInt(document.getElementById('countB').value));
+  drawGrid();
+  placing = null;
+  if (timer) clearInterval(timer);
+  timer = setInterval(step, parseInt(document.getElementById('speed').value));
+};
+
+document.getElementById('stop').onclick=()=>{
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+};
+</script>
+</body>
+</html>
